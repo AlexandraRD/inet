@@ -100,7 +100,7 @@ void EtherHub::receiveSignal(cComponent *source, simsignal_t signalID, cObject *
 
     ASSERT(signalID == POST_MODEL_CHANGE);
 
-    // if new gates have been added, we need to call setDeliverOnReceptionStart(true) on them
+    // if new gates have been added, we need to call setDeliverImmediately(true) on them
     cPostGateVectorResizeNotification *notif = dynamic_cast<cPostGateVectorResizeNotification *>(obj);
     if (notif) {
         if (strcmp(notif->gateName, "ethg") == 0) {
