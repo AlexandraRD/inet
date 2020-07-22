@@ -482,8 +482,8 @@ void EtherMacBase::readChannelParameters(bool errorWhenAsymmetric)
     // to verify at the next opportunity (event) that the two channels have eventually
     // been set to the same value.
 
-    auto *outTrChannel = check_and_cast_nullable<cTransmissionChannel *>(physOutGate->findTransmissionChannel());
-    auto *inTrChannel = check_and_cast_nullable<cTransmissionChannel *>(physInGate->findIncomingTransmissionChannel());
+    auto *outTrChannel = check_and_cast_nullable<cDatarateChannel *>(physOutGate->findTransmissionChannel());
+    auto *inTrChannel = check_and_cast_nullable<cDatarateChannel *>(physInGate->findIncomingTransmissionChannel());
 
     connected = physOutGate->getPathEndGate()->isConnected() && physInGate->getPathStartGate()->isConnected();
 
