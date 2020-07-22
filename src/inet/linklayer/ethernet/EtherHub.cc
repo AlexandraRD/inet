@@ -172,7 +172,7 @@ void EtherHub::handleMessage(cMessage *msg)
             ogate->getTransmissionChannel()->forceTransmissionFinishTime(SIMTIME_ZERO);
 
             // send
-            send(signal2, ogate, signal->getDuration());
+            send(signal2, SendOptions().duration(signal->getDuration()), ogate);
 
             if (isLast)
                 msg = nullptr; // msg sent, do not delete it.
