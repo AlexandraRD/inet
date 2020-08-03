@@ -42,6 +42,7 @@ void EtherBus::initialize()
 {
     numMessages = 0;
     WATCH(numMessages);
+    setTxUpdateSupport(true);
 
     propagationSpeed = par("propagationSpeed");  //TODO there is a hardcoded propagation speed in EtherMACBase.cc -- use that?
 
@@ -241,9 +242,16 @@ void EtherBus::handleMessage(cMessage *msg)
             // send out on gate
             cMessage *msg2 = isLast ? msg : msg->dup();
 
-            // stop current transmission
-            ogate->getTransmissionChannel()->forceTransmissionFinishTime(SIMTIME_ZERO);
-            send(msg2, ogate);
+            if (ogate->getTransmissionChannel()->isBusy()) {
+                delete msg2;    //TODO modify current transmission: set bit error, etc...
+                // stop current transmission
+                //ogate->getTransmissionChannel()->forceTransmissionFinishTime(SIMTIME_ZERO);    //FIXME forceTransmissionFinishTime
+                // send
+                // send(msg2, ogate);
+            }
+            else {
+                send(msg2, ogate);
+            }
         }
         else {
             // skip gate

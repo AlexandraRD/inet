@@ -35,6 +35,8 @@ void EtherHub::initialize()
     inputGateBaseId = gateBaseId("ethg$i");
     outputGateBaseId = gateBaseId("ethg$o");
 
+    setTxUpdateSupport(true);
+
     numMessages = 0;
     WATCH(numMessages);
 
@@ -168,11 +170,16 @@ void EtherHub::handleMessage(cMessage *msg)
             bool isLast = (arrivalPort == numPorts - 1) ? (i == numPorts - 2) : (i == numPorts - 1);
             cMessage *msg2 = isLast ? msg : msg->dup();
 
-            // stop current transmission
-            ogate->getTransmissionChannel()->forceTransmissionFinishTime(SIMTIME_ZERO);
-
-            // send
-            send(msg2, ogate);
+            if (ogate->getTransmissionChannel()->isBusy()) {
+                delete msg2;    //TODO modify current transmission: set bit error, etc...
+                // stop current transmission
+                //ogate->getTransmissionChannel()->forceTransmissionFinishTime(SIMTIME_ZERO);    //FIXME forceTransmissionFinishTime
+                // send
+                // send(msg2, ogate);
+            }
+            else {
+                send(msg2, ogate);
+            }
 
             if (isLast)
                 msg = nullptr; // msg sent, do not delete it.
