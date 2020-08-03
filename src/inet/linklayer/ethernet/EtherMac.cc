@@ -101,6 +101,7 @@ void EtherMac::initializeFlags()
     duplexMode = par("duplexMode");
     frameBursting = !duplexMode && par("frameBursting");
     physInGate->setDeliverImmediately(true);
+    setTxUpdateSupport(true);
 }
 
 void EtherMac::processConnectDisconnect()
@@ -418,7 +419,7 @@ void EtherMac::processMsgFromNetwork(EthernetSignalBase *signal)
         delete signal;
 
         EV_DETAIL << "Transmission interrupted by incoming frame, handling collision\n";
-        cancelEvent((transmitState == TRANSMITTING_STATE) ? endTxMsg : endIFGMsg);
+        abortTransmission();    // transmissionChannel->forceTransmissionFinishTime(SIMTIME_ZERO);
 
         EV_DETAIL << "Transmitting jam signal\n";
         sendJamSignal();    // backoff will be executed when jamming finished
@@ -480,6 +481,10 @@ void EtherMac::handleEndIFGPeriod()
     if (transmitState != WAIT_IFG_STATE && transmitState != SEND_IFG_STATE)
         throw cRuntimeError("Not in WAIT_IFG_STATE at the end of IFG period");
 
+    if (transmitState == SEND_IFG_STATE) {
+        delete curTxSignal;
+        curTxSignal = nullptr;
+    }
     currentSendPkTreeID = 0;
 
     EV_DETAIL << "IFG elapsed\n";
@@ -547,7 +552,13 @@ void EtherMac::startFrameTransmission()
     }
     signal->encapsulate(frame);
     signal->addByteLength(extensionLength.get());
+    curTxSignal = signal->dup();
+    curTxSignal->setOrigPacketId(signal->getId());
     send(signal, physOutGate);
+    scheduleEndTxPeriod(sentFrameByteLength);
+    // only count transmissions in totalSuccessfulRxTxTime if channel is half-duplex
+    if (!duplexMode)
+        channelBusySince = simTime();
 
     // check for collisions (there might be an ongoing reception which we don't know about, see below)
     if (!duplexMode && receiveState != RX_IDLE_STATE) {
@@ -560,6 +571,8 @@ void EtherMac::startFrameTransmission()
         //
         EV_DETAIL << "startFrameTransmission(): sending JAM signal.\n";
         printState();
+
+        abortTransmission();    // transmissionChannel->forceTransmissionFinishTime(SIMTIME_ZERO);    //FIXME forceTransmissionFinishTime
 
         sendJamSignal();
         // numConcurrentRxTransmissions stays the same: +1 transmission, -1 jam
@@ -574,14 +587,28 @@ void EtherMac::startFrameTransmission()
         // go to collision state
         changeReceptionState(RX_COLLISION_STATE);
     }
-    else {
-        // no collision
-        scheduleEndTxPeriod(sentFrameByteLength);
+}
 
-        // only count transmissions in totalSuccessfulRxTxTime if channel is half-duplex
-        if (!duplexMode)
-            channelBusySince = simTime();
+void EtherMac::abortTransmission()
+{
+    ASSERT(curTxSignal != nullptr);
+    cMessage *txTimer = (transmitState == TRANSMITTING_STATE) ? endTxMsg : endIFGMsg;
+    simtime_t startTransmissionTime = txTimer->getSendingTime();
+    simtime_t sentDuration = simTime() - startTransmissionTime;
+    if (auto curTxPacket = check_and_cast_nullable<Packet*>(curTxSignal->decapsulate())) {
+        double sentPart = sentDuration / (txTimer->getArrivalTime() - startTransmissionTime);
+        //TODO: removed length calculation based on the PHY layer (parallel bits, bit order, etc.)
+        B removedLength = curTxPacket->getDataLength() - B(floor(curTxPacket->getByteLength() * sentPart));    //TODO when using bit precision, error occured in removeAtBack(), when length is not a byte
+        if (removedLength > B(0)) {
+            curTxPacket->removeAtBack(removedLength);
+            curTxPacket->setBitError(true);    //TODO is this needed?
+        }
+        curTxSignal->encapsulate(curTxPacket);
     }
+    curTxSignal->setBitError(true);    //TODO is this needed?
+    send(curTxSignal, SendOptions().updateTx(curTxSignal->getOrigPacketId()).duration(sentDuration), physOutGate);
+    curTxSignal = nullptr;
+    cancelEvent(txTimer);  //fixme check it!!!!
 }
 
 void EtherMac::handleEndTxPeriod()
@@ -594,6 +621,8 @@ void EtherMac::handleEndTxPeriod()
 
     if (currentTxFrame == nullptr)
         throw cRuntimeError("Frame under transmission cannot be found");
+    delete curTxSignal;
+    curTxSignal = nullptr;
 
     numFramesSent++;
     numBytesSent += currentTxFrame->getByteLength();
@@ -709,7 +738,6 @@ void EtherMac::sendJamSignal()
     jam->setBitrate(curEtherDescr->txrate);
     jam->setAbortedPkTreeID(currentSendPkTreeID);
 
-    transmissionChannel->forceTransmissionFinishTime(SIMTIME_ZERO);
     //emit(packetSentToLowerSignal, jam);
     send(jam, physOutGate);
 
@@ -822,7 +850,15 @@ void EtherMac::frameReceptionComplete()
     bool hasBitError = signal->hasBitError();
     auto packet = check_and_cast<Packet *>(signal->decapsulate());
     delete signal;
-    decapsulate(packet);
+    if (!decapsulate(packet)) {
+        numDroppedBitError++;
+        PacketDropDetails details;
+        details.setReason(INCORRECTLY_RECEIVED);
+        emit(packetDroppedSignal, packet, &details);
+        delete packet;
+        return;
+    }
+
     emit(packetReceivedFromLowerSignal, packet);
 
     if (hasBitError || !verifyCrcAndLength(packet)) {
@@ -931,6 +967,8 @@ void EtherMac::fillIFGIfInBurst()
         gap->setBitrate(curEtherDescr->txrate);
         bytesSentInBurst += B(gap->getByteLength());
         currentSendPkTreeID = gap->getTreeId();
+        curTxSignal = gap->dup();
+        curTxSignal->setOrigPacketId(gap->getId());
         send(gap, physOutGate);
         changeTransmissionState(SEND_IFG_STATE);
         rescheduleAt(transmissionChannel->getTransmissionFinishTime(), endIFGMsg);

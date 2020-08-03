@@ -59,6 +59,7 @@ class INET_API EtherMac : public EtherMacBase
     cMessage *endRxMsg = nullptr;
     cMessage *endBackoffMsg = nullptr;
     cMessage *endJammingMsg = nullptr;
+    EthernetSignalBase *curTxSignal = nullptr;
 
     // list of receptions during reconnect state; an additional special entry (with packetTreeId=-1)
     // stores the end time of the reconnect state
@@ -107,6 +108,7 @@ class INET_API EtherMac : public EtherMacBase
     virtual void beginSendFrames();
     virtual void sendJamSignal();
     virtual void startFrameTransmission();
+    virtual void abortTransmission();
     virtual void frameReceptionComplete();
     virtual void processReceivedDataFrame(Packet *frame);
     virtual void processReceivedJam(EthernetJamSignal *jam);

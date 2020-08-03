@@ -376,11 +376,20 @@ void EtherMacBase::encapsulate(Packet *frame)
     frame->addTagIfAbsent<PacketProtocolTag>()->setProtocol(&Protocol::ethernetPhy);
 }
 
-void EtherMacBase::decapsulate(Packet *packet)
+bool EtherMacBase::decapsulate(Packet *packet)
 {
-    auto phyHeader = packet->popAtFront<EthernetPhyHeader>();
-    ASSERT(packet->getDataLength() >= MIN_ETHERNET_FRAME_BYTES);
+    if (packet->getDataLength() < PREAMBLE_BYTES + SFD_BYTES)
+        return false;
+
+    auto phyHeader = packet->popAtFront<EthernetPhyHeader>(PREAMBLE_BYTES + SFD_BYTES, Chunk::PF_ALLOW_INCOMPLETE | Chunk::PF_ALLOW_INCORRECT);
+
+    if (phyHeader->isIncomplete() || phyHeader->isIncorrect())
+        return false;
+
+    //TODO place for EthernetPhyHeader content check
+
     packet->addTagIfAbsent<PacketProtocolTag>()->setProtocol(&Protocol::ethernetMac);
+    return true;
 }
 
 //FIXME should use it in EtherMac, EtherMacFullDuplex, etc. modules. But should not use it in EtherBus, EtherHub.

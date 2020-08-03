@@ -185,7 +185,7 @@ class INET_API EtherMacBase : public MacProtocolBase
     // helpers
     virtual void processConnectDisconnect();
     virtual void encapsulate(Packet *packet);
-    virtual void decapsulate(Packet *packet);
+    virtual bool decapsulate(Packet *packet);
 
     /// Verify ethernet packet: check FCS and payload length
     bool verifyCrcAndLength(Packet *packet);
