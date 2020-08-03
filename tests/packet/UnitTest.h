@@ -22,6 +22,8 @@
 #include "inet/common/packet/serializer/SequenceChunkSerializer.h"
 #include "UnitTest_m.h"
 
+#include "inet/linklayer/ethernet/EtherFrame_m.h"
+
 namespace inet {
 
 class CompoundHeader : public CompoundHeader_Base

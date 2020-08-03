@@ -1901,6 +1901,48 @@ static void testRegionTags()
     }
 }
 
+static void testZBojthe()
+{
+    // 1. packet provides ByteCountChunks by default if it contains a ByteCountChunk only
+    Packet packet1;
+    packet1.insertAtBack(makeImmutableByteCountChunk(B(10)));
+    packet1.insertAtBack(makeImmutableByteCountChunk(B(10)));
+    packet1.insertAtBack(makeImmutableByteCountChunk(B(10)));
+    const auto& chunk1 = packet1.popAtFront(b(15));
+    const auto& chunk2 = packet1.popAtBack(b(15));
+    ASSERT(chunk1 != nullptr);
+    ASSERT(chunk1->getChunkLength() == b(15));
+    ASSERT(dynamicPtrCast<const BitCountChunk>(chunk1) != nullptr);
+    ASSERT(chunk2 != nullptr);
+    ASSERT(chunk2->getChunkLength() == b(15));
+    ASSERT(dynamicPtrCast<const BitCountChunk>(chunk2) != nullptr);
+
+    // 2. packet provides BytesChunks by default if it contains a BytesChunk only
+    Packet packet2;
+    packet2.insertAtBack(makeImmutableBytesChunk(makeVector(10)));
+    packet2.insertAtBack(makeImmutableBytesChunk(makeVector(10)));
+    packet2.insertAtBack(makeImmutableBytesChunk(makeVector(10)));
+    const auto& chunk3 = packet2.popAtFront(b(15));
+    const auto& chunk4 = packet2.popAtBack(b(15));
+    ASSERT(chunk3 != nullptr);
+    ASSERT(chunk3->getChunkLength() == b(15));
+    ASSERT(dynamicPtrCast<const BitsChunk>(chunk3) != nullptr);
+    ASSERT(chunk4 != nullptr);
+    ASSERT(chunk4->getChunkLength() == b(15));
+    ASSERT(dynamicPtrCast<const BitsChunk>(chunk4) != nullptr);
+
+    // 3. Peek/Pop at back FcsChunk anywhere without conversion error,
+    //    returns DECLARED_INCORRECT when serialize+deserialize required for correct conversion
+    Packet packet3;
+    packet3.insertAtBack(makeImmutableByteCountChunk(B(10)));
+    const auto& chunk5 = packet3.popAtBack<EthernetFcs>(B(4));
+    ASSERT(chunk5 != nullptr);
+    ASSERT(chunk5->getChunkLength() == B(4));
+    ASSERT(chunk5->getFcsMode() == FCS_DECLARED_INCORRECT);
+
+    // TODO
+}
+
 void UnitTest::initialize()
 {
     testMutable();
@@ -1942,6 +1984,7 @@ void UnitTest::initialize()
     testChunkTags();
     testPacketTags();
     testRegionTags();
+    testZBojthe();
 }
 
 } // namespace
