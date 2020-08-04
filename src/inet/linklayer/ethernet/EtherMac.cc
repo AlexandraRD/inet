@@ -598,17 +598,17 @@ void EtherMac::abortTransmission()
     if (auto curTxPacket = check_and_cast_nullable<Packet*>(curTxSignal->decapsulate())) {
         double sentPart = sentDuration / (txTimer->getArrivalTime() - startTransmissionTime);
         //TODO: removed length calculation based on the PHY layer (parallel bits, bit order, etc.)
-        B removedLength = curTxPacket->getDataLength() - B(floor(curTxPacket->getByteLength() * sentPart));    //TODO when using bit precision, error occured in removeAtBack(), when length is not a byte
-        if (removedLength > B(0)) {
+        b removedLength = curTxPacket->getDataLength() - B(floor(curTxPacket->getBitLength() * sentPart));
+        if (removedLength > b(0)) {
             curTxPacket->removeAtBack(removedLength);
-            curTxPacket->setBitError(true);    //TODO is this needed?
+            curTxPacket->setBitError(true);
         }
         curTxSignal->encapsulate(curTxPacket);
     }
-    curTxSignal->setBitError(true);    //TODO is this needed?
+    curTxSignal->setBitError(true);
     send(curTxSignal, SendOptions().updateTx(curTxSignal->getOrigPacketId()).duration(sentDuration), physOutGate);
     curTxSignal = nullptr;
-    cancelEvent(txTimer);  //fixme check it!!!!
+    cancelEvent(txTimer);
 }
 
 void EtherMac::handleEndTxPeriod()
