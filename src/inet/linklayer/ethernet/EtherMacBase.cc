@@ -29,7 +29,7 @@
 #include "inet/linklayer/ethernet/EtherMacBase.h"
 #include "inet/linklayer/ethernet/Ethernet.h"
 #include "inet/linklayer/ethernet/EtherPhyFrame_m.h"
-#include "inet/networklayer/common/InterfaceEntry.h"
+#include "inet/networklayer/common/NetworkInterface.h"
 #include "inet/queueing/function/PacketComparatorFunction.h"
 
 namespace inet {
@@ -256,21 +256,21 @@ void EtherMacBase::initializeStatistics()
     WATCH(numPauseFramesSent);
 }
 
-void EtherMacBase::configureInterfaceEntry()
+void EtherMacBase::configureNetworkInterface()
 {
 
     // MTU: typical values are 576 (Internet de facto), 1500 (Ethernet-friendly),
     // 4000 (on some point-to-point links), 4470 (Cisco routers default, FDDI compatible)
-    interfaceEntry->setMtu(par("mtu"));
+    networkInterface->setMtu(par("mtu"));
 
     // capabilities
-    interfaceEntry->setMulticast(true);
-    interfaceEntry->setBroadcast(true);
+    networkInterface->setMulticast(true);
+    networkInterface->setBroadcast(true);
 }
 
 void EtherMacBase::handleStartOperation(LifecycleOperation *operation)
 {
-    interfaceEntry->setState(InterfaceEntry::State::UP);
+    networkInterface->setState(NetworkInterface::State::UP);
     initializeFlags();
     initializeQueue();
     readChannelParameters(true);
@@ -279,12 +279,12 @@ void EtherMacBase::handleStartOperation(LifecycleOperation *operation)
 void EtherMacBase::handleStopOperation(LifecycleOperation *operation)
 {
     if (currentTxFrame != nullptr || !txQueue->isEmpty()) {
-        interfaceEntry->setState(InterfaceEntry::State::GOING_DOWN);
+        networkInterface->setState(NetworkInterface::State::GOING_DOWN);
         delayActiveOperationFinish(par("stopOperationTimeout"));
     }
     else {
-        interfaceEntry->setCarrier(false);
-        interfaceEntry->setState(InterfaceEntry::State::DOWN);
+        networkInterface->setCarrier(false);
+        networkInterface->setState(NetworkInterface::State::DOWN);
         startActiveOperationExtraTimeOrFinish(par("stopOperationExtraTime"));
     }
 }
@@ -293,9 +293,9 @@ void EtherMacBase::handleCrashOperation(LifecycleOperation *operation)
 {
 //    clearQueue();
     connected = false;
-    interfaceEntry->setCarrier(false);
+    networkInterface->setCarrier(false);
     processConnectDisconnect();
-    interfaceEntry->setState(InterfaceEntry::State::DOWN);
+    networkInterface->setState(NetworkInterface::State::DOWN);
 }
 
 // TODO: this method should be renamed and called where processing is finished on the current frame (i.e. curTxFrame becomes nullptr)
@@ -305,9 +305,9 @@ void EtherMacBase::processAtHandleMessageFinished()
         if (currentTxFrame == nullptr && txQueue->isEmpty()) {
             EV << "Ethernet Queue is empty, MAC stopped\n";
             connected = false;
-            interfaceEntry->setCarrier(false);
+            networkInterface->setCarrier(false);
             processConnectDisconnect();
-            interfaceEntry->setState(InterfaceEntry::State::DOWN);
+            networkInterface->setState(NetworkInterface::State::DOWN);
             startActiveOperationExtraTimeOrFinish(par("stopOperationExtraTime"));
         }
     }
@@ -503,8 +503,8 @@ void EtherMacBase::readChannelParameters(bool errorWhenAsymmetric)
     if (rxDisabled || txDisabled)
         connected = false;
 
-    if (!interfaceEntry)
-        interfaceEntry = getContainingNicModule(this);
+    if (!networkInterface)
+        networkInterface = getContainingNicModule(this);
 
     channelsDiffer = (rxDisabled != txDisabled) || (rxDelay != txDelay);
 
@@ -522,7 +522,7 @@ void EtherMacBase::readChannelParameters(bool errorWhenAsymmetric)
             double rxBitrate = rxTransmissionChannel->par("datarate");
             if (bitrate != rxBitrate)
                 throw cRuntimeError("The datarate parameters on tx and rx transmission channels are differ %g vs %g", bitrate, rxBitrate);
-            interfaceEntry->par("bitrate").setDoubleValue(bitrate);
+            networkInterface->par("bitrate").setDoubleValue(bitrate);
         }
         else if (!rxTransmissionChannel->hasPar("datarate") && !txTransmissionChannel->hasPar("datarate")) {
             // channels doesn't have datarate parameters
@@ -530,12 +530,12 @@ void EtherMacBase::readChannelParameters(bool errorWhenAsymmetric)
         else
             throw cRuntimeError("asymmetric settings: only one channel has datarate parameter on tx/rx transmission channels");
 
-        double txRate = interfaceEntry->par("bitrate");
+        double txRate = networkInterface->par("bitrate");
         for (auto & etherDescr : etherDescrs) {
             if (txRate == etherDescr.txrate) {
                 curEtherDescr = &(etherDescr);
-                interfaceEntry->setCarrier(true);
-                interfaceEntry->setDatarate(txRate);
+                networkInterface->setCarrier(true);
+                networkInterface->setDatarate(txRate);
                 return;
             }
         }
@@ -548,8 +548,8 @@ void EtherMacBase::readChannelParameters(bool errorWhenAsymmetric)
             rxTransmissionChannel = nullptr;
         if (!outTrChannel)
             txTransmissionChannel = nullptr;
-        interfaceEntry->setCarrier(false);
-        interfaceEntry->setDatarate(0);
+        networkInterface->setCarrier(false);
+        networkInterface->setDatarate(0);
     }
 }
 

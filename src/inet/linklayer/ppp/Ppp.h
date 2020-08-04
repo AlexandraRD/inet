@@ -28,7 +28,7 @@
 
 namespace inet {
 
-class InterfaceEntry;
+class NetworkInterface;
 
 /**
  * PPP implementation.
@@ -65,7 +65,7 @@ class INET_API Ppp : public MacProtocolBase
     virtual void receiveSignal(cComponent *source, simsignal_t signalID, cObject *obj, cObject *details) override;
 
     // MacBase functions
-    virtual void configureInterfaceEntry() override;
+    virtual void configureNetworkInterface() override;
 
   public:
     virtual ~Ppp();
