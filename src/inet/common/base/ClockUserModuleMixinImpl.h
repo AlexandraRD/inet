@@ -61,6 +61,9 @@ void ClockUserModuleMixin<T>::initialize(int stage) {
 #ifndef NDEBUG
         className = T::getClassName();
 #endif
+// TODO: uncomment when the PRE_MODEL_CHANGE signal arrives with cPreModuleDeleteNotification on the clock module, currently it's not sent by the kernel
+// TODO: if (clock != nullptr) dynamic_cast<cModule *>(clock)->subscribe(PRE_MODEL_CHANGE, this);
+        getSimulation()->getSystemModule()->subscribe(PRE_MODEL_CHANGE, this);
     }
 }
 
@@ -128,6 +131,18 @@ clocktime_t ClockUserModuleMixin<T>::getArrivalClockTime(ClockEvent *msg) const 
         return msg->getArrivalClockTime();
     else
         return ClockTime::from(msg->getArrivalTime());
+}
+
+template<typename T>
+void ClockUserModuleMixin<T>::receiveSignal(cComponent *source, simsignal_t signal, cObject *obj, cObject *details)
+{
+    Enter_Method("receiveSignal");
+    if (signal == PRE_MODEL_CHANGE) {
+        if (auto moduleDeleteNotification = dynamic_cast<cPreModuleDeleteNotification *>(obj)) {
+            // TODO: see above if (moduleDeleteNotification->module == dynamic_cast<cModule *>(clock))
+                clock = nullptr;
+        }
+    }
 }
 
 #endif // #ifdef WITH_CLOCK_SUPPORT
