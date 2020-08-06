@@ -711,7 +711,7 @@ void EtherMac::sendJamSignal()
     jam->setBitrate(curEtherDescr->txrate);
     jam->setAbortedPkTreeID(currentSendPkTreeID);
 
-    txTransmissionChannel->forceTransmissionFinishTime(SIMTIME_ZERO);
+//    txTransmissionChannel->forceTransmissionFinishTime(SIMTIME_ZERO);
     //emit(packetSentToLowerSignal, jam);
     auto duration = calculateDuration(jam);
     send(jam, SendOptions().duration(duration), physOutGate);

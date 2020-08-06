@@ -128,8 +128,8 @@ void Ppp::refreshOutGateConnection(bool connected)
         if (endTransmissionEvent->isScheduled()) {
             cancelEvent(endTransmissionEvent);
 
-            if (datarateChannel)
-                datarateChannel->forceTransmissionFinishTime(SIMTIME_ZERO);
+//            if (datarateChannel)
+//                datarateChannel->forceTransmissionFinishTime(SIMTIME_ZERO);
         }
 
         PacketDropDetails details;
