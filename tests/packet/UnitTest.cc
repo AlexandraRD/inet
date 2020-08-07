@@ -1912,12 +1912,12 @@ static void testZBojthe()
     const auto& chunk2 = packet1.popAtBack(b(15));
     ASSERT(chunk1 != nullptr);
     ASSERT(chunk1->getChunkLength() == b(15));
-    ASSERT(dynamicPtrCast<const BitCountChunk>(chunk1) != nullptr);
+    ASSERT(dynamicPtrCast<const SliceChunk>(chunk1) != nullptr);
     ASSERT(chunk2 != nullptr);
     ASSERT(chunk2->getChunkLength() == b(15));
-    ASSERT(dynamicPtrCast<const BitCountChunk>(chunk2) != nullptr);
+    ASSERT(dynamicPtrCast<const SliceChunk>(chunk2) != nullptr);
 
-    // 2. packet provides BytesChunks by default if it contains a BytesChunk only
+    // 2. packet
     Packet packet2;
     packet2.insertAtBack(makeImmutableBytesChunk(makeVector(10)));
     packet2.insertAtBack(makeImmutableBytesChunk(makeVector(10)));
@@ -1926,20 +1926,21 @@ static void testZBojthe()
     const auto& chunk4 = packet2.popAtBack(b(15));
     ASSERT(chunk3 != nullptr);
     ASSERT(chunk3->getChunkLength() == b(15));
-    ASSERT(dynamicPtrCast<const BitsChunk>(chunk3) != nullptr);
+    ASSERT(dynamicPtrCast<const SliceChunk>(chunk3) != nullptr);
     ASSERT(chunk4 != nullptr);
     ASSERT(chunk4->getChunkLength() == b(15));
-    ASSERT(dynamicPtrCast<const BitsChunk>(chunk4) != nullptr);
+    ASSERT(dynamicPtrCast<const SliceChunk>(chunk4) != nullptr);
 
+/*
     // 3. Peek/Pop at back FcsChunk anywhere without conversion error,
-    //    returns DECLARED_INCORRECT when serialize+deserialize required for correct conversion
+    //    returns DECLARED_INCORRECT when serialize+deserialize disabled
     Packet packet3;
     packet3.insertAtBack(makeImmutableByteCountChunk(B(10)));
     const auto& chunk5 = packet3.popAtBack<EthernetFcs>(B(4));
     ASSERT(chunk5 != nullptr);
     ASSERT(chunk5->getChunkLength() == B(4));
     ASSERT(chunk5->getFcsMode() == FCS_DECLARED_INCORRECT);
-
+*/
     // TODO
 }
 
