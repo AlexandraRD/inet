@@ -17,7 +17,6 @@
 
 #include "inet/common/Simsignals.h"
 #include "inet/linklayer/ethernet/EtherHub.h"
-#include "inet/linklayer/ethernet/EtherPhyFrame_m.h"
 
 namespace inet {
 
@@ -29,20 +28,36 @@ inline std::ostream& operator<<(std::ostream& os, cMessage *msg)
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const EtherHub::GateInfo& tr)
+{
+    os << "outId:" << tr.outgoingOrigId << ", numInIds:" << tr.forwardFromPorts.size() << ", collision:" << tr.outgoingCollision << ", start:" << tr.outgoingStartTime;
+    return os;
+}
+
+EtherHub::~EtherHub()
+{
+    for (auto& gateInfo: gateInfos) {
+        delete gateInfo.incomingSignal;
+    }
+}
+
 void EtherHub::initialize()
 {
     numPorts = gateSize("ethg");
     inputGateBaseId = gateBaseId("ethg$i");
     outputGateBaseId = gateBaseId("ethg$o");
+    gateInfos.resize(numPorts);
 
     setTxUpdateSupport(true);
 
     numMessages = 0;
     WATCH(numMessages);
+    WATCH_VECTOR(gateInfos);
 
     // ensure we receive frames when their first bits arrive
     for (int i = 0; i < numPorts; i++)
         gate(inputGateBaseId + i)->setDeliverImmediately(true);
+    subscribe(PRE_MODEL_CHANGE, this);    // for cPrePathCutNotification signal
     subscribe(POST_MODEL_CHANGE, this);    // we'll need to do the same for dynamically added gates as well
 
     checkConnections(true);
@@ -51,7 +66,7 @@ void EtherHub::initialize()
 void EtherHub::checkConnections(bool errorWhenAsymmetric)
 {
     int numActivePorts = 0;
-    double datarate = 0.0;
+    datarate = 0.0;
     dataratesDiffer = false;
 
     for (int i = 0; i < numPorts; i++) {
@@ -100,43 +115,38 @@ void EtherHub::receiveSignal(cComponent *source, simsignal_t signalID, cObject *
 {
     Enter_Method_Silent();
 
-    ASSERT(signalID == POST_MODEL_CHANGE);
-
-    // if new gates have been added, we need to call setDeliverOnReceptionStart(true) on them
-    cPostGateVectorResizeNotification *notif = dynamic_cast<cPostGateVectorResizeNotification *>(obj);
-    if (notif) {
-        if (strcmp(notif->gateName, "ethg") == 0) {
-            int newSize = gateSize("ethg");
-            for (int i = notif->oldSize; i < newSize; i++)
-                gate(inputGateBaseId + i)->setDeliverImmediately(true);
+    if (signalID == POST_MODEL_CHANGE) {
+    }
+    else if (signalID == POST_MODEL_CHANGE) {
+        // if new gates have been added, we need to call setDeliverImmediately(true) on them
+        if (cPostGateVectorResizeNotification *notif = dynamic_cast<cPostGateVectorResizeNotification *>(obj)) {
+            if (strcmp(notif->gateName, "ethg") == 0) {
+                int newSize = gateSize("ethg");
+                for (int i = notif->oldSize; i < newSize; i++)
+                    gate(inputGateBaseId + i)->setDeliverImmediately(true);
+                gateInfos.resize(newSize);
+            }
+            return;
         }
-        return;
-    }
-
-    cPostPathCreateNotification *connNotif = dynamic_cast<cPostPathCreateNotification *>(obj);
-    if (connNotif) {
-        if ((this == connNotif->pathStartGate->getOwnerModule()) || (this == connNotif->pathEndGate->getOwnerModule()))
-            checkConnections(false);
-        return;
-    }
-
-    cPostPathCutNotification *cutNotif = dynamic_cast<cPostPathCutNotification *>(obj);
-    if (cutNotif) {
-        if ((this == cutNotif->pathStartGate->getOwnerModule()) || (this == cutNotif->pathEndGate->getOwnerModule()))
-            checkConnections(false);
-        return;
-    }
-
-    // note: we are subscribed to the channel object too
-    cPostParameterChangeNotification *parNotif = dynamic_cast<cPostParameterChangeNotification *>(obj);
-    if (parNotif) {
-        cChannel *channel = dynamic_cast<cDatarateChannel *>(parNotif->par->getOwner());
-        if (channel) {
-            cGate *gate = channel->getSourceGate();
-            if (gate->pathContains(this))
+        else if (cPostPathCreateNotification *connNotif = dynamic_cast<cPostPathCreateNotification *>(obj)) {
+            if ((this == connNotif->pathStartGate->getOwnerModule()) || (this == connNotif->pathEndGate->getOwnerModule()))
                 checkConnections(false);
+            return;
         }
-        return;
+        else if (cPostPathCutNotification *cutNotif = dynamic_cast<cPostPathCutNotification *>(obj)) {
+            if ((this == cutNotif->pathStartGate->getOwnerModule()) || (this == cutNotif->pathEndGate->getOwnerModule()))
+                checkConnections(false);
+            return;
+        }
+        else if (cPostParameterChangeNotification *parNotif = dynamic_cast<cPostParameterChangeNotification *>(obj)) {
+            cChannel *channel = dynamic_cast<cDatarateChannel *>(parNotif->par->getOwner());
+            if (channel) {
+                cGate *gate = channel->getSourceGate();
+                if (gate->pathContains(this))
+                    checkConnections(false);
+            }
+            return;
+        }
     }
 }
 
@@ -145,7 +155,7 @@ void EtherHub::handleMessage(cMessage *msg)
     if (dataratesDiffer)
         checkConnections(true);
 
-    auto signal = check_and_cast<EthernetSignalBase *>(msg);
+    EthernetSignalBase *signal = check_and_cast<EthernetSignalBase *>(msg);
     if (signal->getSrcMacFullDuplex() != false)
         throw cRuntimeError("Ethernet misconfiguration: MACs on the Ethernet HUB must be all in half-duplex mode, check it in module '%s'", signal->getSenderModule()->getFullPath().c_str());
 
@@ -161,31 +171,81 @@ void EtherHub::handleMessage(cMessage *msg)
         return;
     }
 
-    for (int i = 0; i < numPorts; i++) {
-        if (i != arrivalPort) {
-            cGate *ogate = gate(outputGateBaseId + i);
+    simtime_t now = simTime();
+    long incomingOrigId = signal->isUpdate() ? signal->getOrigPacketId() : signal->getId();
+
+    if (signal->isUpdate()) {
+        ASSERT(gateInfos[arrivalPort].incomingOrigId == incomingOrigId);
+        ASSERT(gateInfos[arrivalPort].incomingSignal != nullptr);
+        delete gateInfos[arrivalPort].incomingSignal;
+    }
+    else {
+        ASSERT(gateInfos[arrivalPort].incomingOrigId == -1);
+        gateInfos[arrivalPort].incomingOrigId = incomingOrigId;
+        ASSERT(gateInfos[arrivalPort].incomingSignal == nullptr);
+    }
+
+    gateInfos[arrivalPort].incomingSignal = signal;
+
+    for (int outPort = 0; outPort < numPorts; outPort++) {
+        if (outPort != arrivalPort) {
+            cGate *ogate = gate(outputGateBaseId + outPort);
             if (!ogate->isConnected())
                 continue;
 
-            bool isLast = (arrivalPort == numPorts - 1) ? (i == numPorts - 2) : (i == numPorts - 1);
-            cMessage *msg2 = isLast ? msg : msg->dup();
-
-            if (ogate->getTransmissionChannel()->isBusy()) {
-                delete msg2;    //TODO modify current transmission: set bit error, etc...
-                // stop current transmission
-                //ogate->getTransmissionChannel()->forceTransmissionFinishTime(SIMTIME_ZERO);    //FIXME forceTransmissionFinishTime
-                // send
-                // send(msg2, ogate);
+            if (gateInfos[outPort].forwardFromPorts.empty()) {
+                // new correct transmisssion started
+                EthernetSignalBase *signalCopy = signal->dup();
+                ASSERT(!ogate->getTransmissionChannel()->isBusy());
+                ASSERT(signal->isReceptionStart());
+                gateInfos[outPort].forwardFromPorts.insert(arrivalPort);
+                gateInfos[outPort].outgoingOrigId = signalCopy->getId();
+                gateInfos[outPort].outgoingStartTime = now;
+                gateInfos[outPort].outgoingCollision = false;
+                send(signalCopy, SendOptions().duration(signal->getDuration()), ogate);
             }
             else {
-                send(msg2, ogate);
+                gateInfos[outPort].forwardFromPorts.insert(arrivalPort);
+                ASSERT(now + signal->getRemainingDuration() - signal->getDuration() >= gateInfos[outPort].outgoingStartTime);
+                if (!gateInfos[outPort].outgoingCollision && gateInfos[outPort].forwardFromPorts.size() == 1) {
+                    // current single transmisssion updated
+                    ASSERT(signal->isReceptionEnd() || ogate->getTransmissionChannel()->isBusy());
+                    EthernetSignalBase *signalCopy = signal->dup();
+                    send(signalCopy, SendOptions().updateTx(gateInfos[outPort].outgoingOrigId).duration(signal->getDuration()), ogate);
+                }
+                else {
+                    // collision
+                    gateInfos[outPort].outgoingCollision = true;
+                    simtime_t newEnd = now;
+                    for (auto inPort: gateInfos[outPort].forwardFromPorts) {
+                        simtime_t curEnd = gateInfos[inPort].incomingSignal->getArrivalTime() + gateInfos[inPort].incomingSignal->getRemainingDuration();
+                        if (curEnd > newEnd)
+                            newEnd = curEnd;
+                    }
+                    EthernetSignalBase *signalCopy = new EthernetSignalBase("collision");
+                    simtime_t duration = newEnd - gateInfos[outPort].outgoingStartTime;
+                    signalCopy->setBitLength(duration.dbl() * datarate);
+                    signalCopy->setBitrate(datarate);
+                    signalCopy->setBitError(true);
+                    send(signalCopy, SendOptions().updateTx(gateInfos[outPort].outgoingOrigId).duration(duration), ogate);
+                }
             }
-
-            if (isLast)
-                msg = nullptr; // msg sent, do not delete it.
+            if (signal->isReceptionEnd()) {
+                gateInfos[outPort].forwardFromPorts.erase(arrivalPort);
+                if (gateInfos[outPort].forwardFromPorts.empty()) {
+                    // transmisssion finished
+                    gateInfos[outPort].outgoingOrigId = -1;
+                    gateInfos[outPort].outgoingStartTime = now;
+                    gateInfos[outPort].outgoingCollision = false;
+                }
+            }
         }
     }
-    delete msg;
+    if (signal->isReceptionEnd()) {
+        gateInfos[arrivalPort].incomingOrigId = -1;
+        delete gateInfos[arrivalPort].incomingSignal;
+        gateInfos[arrivalPort].incomingSignal = nullptr;
+    }
 }
 
 void EtherHub::finish()

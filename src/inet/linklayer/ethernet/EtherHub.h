@@ -19,6 +19,7 @@
 #define __INET_ETHERHUB_H
 
 #include "inet/common/INETDefs.h"
+#include "inet/linklayer/ethernet/EtherPhyFrame_m.h"
 
 namespace inet {
 
@@ -28,14 +29,30 @@ namespace inet {
  */
 class INET_API EtherHub : public cSimpleModule, protected cListener
 {
+  public:
+    struct GateInfo
+    {
+        std::set<int> forwardFromPorts;
+        EthernetSignalBase *incomingSignal = nullptr;
+        long incomingOrigId = -1;
+        long outgoingOrigId = -1;
+        simtime_t outgoingStartTime;
+        bool outgoingCollision = false;
+    };
   protected:
+    std::vector<GateInfo> gateInfos;
+
     int numPorts;    // sizeof(ethg)
     int inputGateBaseId;    // gate id of ethg$i[0]
     int outputGateBaseId;    // gate id of ethg$o[0]
     bool dataratesDiffer;
+    double datarate = 0;
 
     // statistics
     long numMessages;    // number of messages handled
+
+  public:
+    virtual ~EtherHub();
 
   protected:
     virtual void initialize() override;

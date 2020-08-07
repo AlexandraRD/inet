@@ -63,7 +63,6 @@ class INET_API EtherMacBase : public MacProtocolBase
     // Self-message kind values
     enum SelfMsgKindValues {
         ENDIFG = 100,
-        ENDRECEPTION,
         ENDBACKOFF,
         ENDTRANSMISSION,
         ENDJAMMING,
@@ -113,7 +112,9 @@ class INET_API EtherMacBase : public MacProtocolBase
     int pauseUnitsRequested = 0;    // requested pause duration, or zero -- examined at endTx
 
     // self messages
-    cMessage *endTxMsg = nullptr, *endIFGMsg = nullptr, *endPauseMsg = nullptr;
+    cMessage *endTxTimer = nullptr;
+    cMessage *endIfgTimer = nullptr;
+    cMessage *endPauseTimer = nullptr;
 
     // statistics
     unsigned long numFramesSent = 0;
