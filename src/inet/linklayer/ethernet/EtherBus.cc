@@ -17,9 +17,11 @@
 
 #include "inet/common/INETMath.h"
 #include "inet/linklayer/ethernet/EtherBus.h"
-#include "inet/linklayer/ethernet/EtherPhyFrame_m.h"
+#include "inet/physicallayer/ethernet/EthernetSignal_m.h"
 
 namespace inet {
+
+using namespace inet::physicallayer;
 
 Define_Module(EtherBus);
 
