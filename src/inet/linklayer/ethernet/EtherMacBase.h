@@ -210,5 +210,5 @@ class INET_API EtherMacBase : public MacProtocolBase
 
 } // namespace inet
 
-#endif // ifndef __INET_ETHERMACBASE_H
+#endif
 

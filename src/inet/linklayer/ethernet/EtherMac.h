@@ -122,5 +122,5 @@ class INET_API EtherMac : public EtherMacBase
 
 } // namespace inet
 
-#endif // ifndef __INET_ETHERMAC_H
+#endif
 

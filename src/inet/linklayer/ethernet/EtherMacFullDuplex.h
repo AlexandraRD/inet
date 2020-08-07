@@ -67,5 +67,5 @@ class INET_API EtherMacFullDuplex : public EtherMacBase
 
 } // namespace inet
 
-#endif // ifndef __INET_ETHERMACFULLDUPLEX_H
+#endif
 
