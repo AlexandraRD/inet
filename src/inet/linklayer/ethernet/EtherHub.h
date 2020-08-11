@@ -30,7 +30,7 @@ namespace inet {
 class INET_API EtherHub : public cSimpleModule, protected cListener
 {
   public:
-    struct GateInfo
+    struct PortInfo
     {
         std::set<int> forwardFromPorts;
         EthernetSignalBase *incomingSignal = nullptr;
@@ -40,7 +40,7 @@ class INET_API EtherHub : public cSimpleModule, protected cListener
         bool outgoingCollision = false;
     };
   protected:
-    std::vector<GateInfo> gateInfos;
+    std::vector<PortInfo> portInfos;
 
     int numPorts;    // sizeof(ethg)
     int inputGateBaseId;    // gate id of ethg$i[0]
@@ -61,6 +61,11 @@ class INET_API EtherHub : public cSimpleModule, protected cListener
     virtual void receiveSignal(cComponent *source, simsignal_t signalID, cObject *obj, cObject *details) override;
 
     virtual void checkConnections(bool errorWhenAsymmetric);
+    virtual void rxCutOnPort(int portIdx);
+    virtual void cutActiveTxOnPort(int portIdx);
+    virtual void copyIncomingsToPort(int outPort);
+    virtual void cutSignalEnd(EthernetSignalBase* signal, simtime_t duration);
+    virtual void forwardSignalFrom(int arrivalPort);
 };
 
 } // namespace inet
