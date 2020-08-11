@@ -49,7 +49,6 @@ class INET_API EtherMac : public EtherMacBase
 
   protected:
     // states
-    int numConcurrentTransmissions = 0;    // number of colliding frames -- we must receive this many jams (caches endRxTimeList.size())
     int backoffs = 0;    // value of backoff for exponential back-off algorithm
 
     // other variables
@@ -58,9 +57,6 @@ class INET_API EtherMac : public EtherMacBase
 
     long activeReceptionId = -1; // original packet id of current reception
     simtime_t activeReceptionStart; // reception start time of current reception
-
-    simtime_t tc = -1.0;   // a legujabb idopont, amikor tudjuk hogy collision van
-    simtime_t to;   // a legujabb idopont, amikortol jo lehet a vetel
 
     // statistics
     simtime_t totalCollisionTime;    // total duration of collisions on channel
@@ -93,6 +89,7 @@ class INET_API EtherMac : public EtherMacBase
     virtual void fillIFGIfInBurst();
     virtual void scheduleEndTxPeriod(B sentFrameByteLength);
     virtual void scheduleEndPausePeriod(int pauseUnits);
+    virtual void tryBeginSendFrame();
     virtual void beginSendFrames();
     virtual void startFrameTransmission();
     virtual void abortTransmissionAndAppendJam();
@@ -101,7 +98,6 @@ class INET_API EtherMac : public EtherMacBase
     virtual void processReceivedJam(EthernetSignalBase *jam);
     virtual void processReceivedControlFrame(Packet *packet);
     virtual void processConnectDisconnect() override;
-    virtual void addReception(simtime_t endRxTime);
     virtual void addReceptionInReconnectState(long id, simtime_t endRxTime);
     virtual void processDetectedCollision();
     virtual void calculateRxStatus();
