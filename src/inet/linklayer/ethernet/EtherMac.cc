@@ -243,7 +243,7 @@ void EtherMac::processReceivedJam(EthernetSignalBase *jam)
 
 void EtherMac::processSignalFromNetwork(EthernetSignalBase *signal)
 {
-    EV_DETAIL << "Received " << signal << " from network.\n";
+    EV_DETAIL << "Received " << signal << (signal->isReceptionStart() ? "-start" : signal->isReceptionEnd() ? "-end" : "") << " from network.\n";
 
     if (signal->getSrcMacFullDuplex() != duplexMode)
         throw cRuntimeError("Ethernet misconfiguration: MACs on the same link must be all in full duplex mode, or all in half-duplex mode");
