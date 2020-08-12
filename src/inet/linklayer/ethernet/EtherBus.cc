@@ -16,8 +16,8 @@
  */
 
 #include "inet/common/INETMath.h"
+#include "inet/common/packet/Packet.h"
 #include "inet/linklayer/ethernet/EtherBus.h"
-#include "inet/linklayer/ethernet/EtherPhyFrame_m.h"
 
 namespace inet {
 
@@ -29,13 +29,23 @@ inline std::ostream& operator<<(std::ostream& os, cMessage *msg)
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const EtherBus::BusTap& tr)
+{
+    os << "outId:" << tr.outgoingOrigId << ", numInIds:" << tr.outgoingSignals.size() << ", collision:" << tr.outgoingCollision << ", start:" << tr.outgoingStartTime;
+    return os;
+}
+
 EtherBus::EtherBus()
 {
 }
 
 EtherBus::~EtherBus()
 {
-    delete[] tap;
+    for (auto& t: tap) {
+        for (auto& s: t.outgoingSignals)
+            delete s.second;
+        delete t.incomingSignal;
+    }
 }
 
 void EtherBus::initialize()
@@ -64,7 +74,9 @@ void EtherBus::initialize()
     else if (numPos < numTaps && numPos < 2)
         EV << "Note: `positions' parameter contains too few values, using 5m distances.\n";
 
-    tap = new BusTap[numTaps];
+    tap.resize(numTaps);
+
+    WATCH_VECTOR(tap);
 
     int i;
     double distance = numPos >= 2 ? pos[numPos - 1] - pos[numPos - 2] : 5;
@@ -97,6 +109,7 @@ void EtherBus::initialize()
     // ensure we receive frames when their first bits arrive
     for (int i = 0; i < numTaps; i++)
         gate(inputGateBaseId + i)->setDeliverImmediately(true);
+    subscribe(PRE_MODEL_CHANGE, this);    // for cPrePathCutNotification signal
     subscribe(POST_MODEL_CHANGE, this);    // we'll need to do the same for dynamically added gates as well
 
     checkConnections(true);
@@ -105,8 +118,8 @@ void EtherBus::initialize()
 void EtherBus::checkConnections(bool errorWhenAsymmetric)
 {
     int numActiveTaps = 0;
-
-    double datarate = 0.0;
+    datarate = 0.0;
+    dataratesDiffer = false;
 
     for (int i = 0; i < numTaps; i++) {
         cGate *igate = gate(inputGateBaseId + i);
@@ -154,109 +167,136 @@ void EtherBus::receiveSignal(cComponent *source, simsignal_t signalID, cObject *
 {
     Enter_Method_Silent();
 
-    ASSERT(signalID == POST_MODEL_CHANGE);
-
-    // throw error if new gates have been added
-    cPostGateVectorResizeNotification *notif = dynamic_cast<cPostGateVectorResizeNotification *>(obj);
-    if (notif) {
-        if (strcmp(notif->gateName, "ethg") == 0)
-            throw cRuntimeError("EtherBus does not allow adding/removing links dynamically");
-    }
-
-    cPostPathCreateNotification *connNotif = dynamic_cast<cPostPathCreateNotification *>(obj);
-    if (connNotif) {
-        if ((this == connNotif->pathStartGate->getOwnerModule()) || (this == connNotif->pathEndGate->getOwnerModule()))
-            checkConnections(false);
-        return;
-    }
-
-    cPostPathCutNotification *cutNotif = dynamic_cast<cPostPathCutNotification *>(obj);
-    if (cutNotif) {
-        if ((this == cutNotif->pathStartGate->getOwnerModule()) || (this == cutNotif->pathEndGate->getOwnerModule()))
-            checkConnections(false);
-        return;
-    }
-
-    // note: we are subscribed to the channel object too
-    cPostParameterChangeNotification *parNotif = dynamic_cast<cPostParameterChangeNotification *>(obj);
-    if (parNotif) {
-        cChannel *channel = dynamic_cast<cDatarateChannel *>(parNotif->par->getOwner());
-        if (channel) {
-            cGate *gate = channel->getSourceGate();
-            if (gate->pathContains(this))
-                checkConnections(false);
+    if (signalID == PRE_MODEL_CHANGE) {
+        if (auto *notification = dynamic_cast<cPrePathCutNotification *>(obj)) {
+            if ((this == notification->pathStartGate->getOwnerModule()) && (notification->pathStartGate->getBaseId() == outputGateBaseId)) {
+                cutActiveTxOnTap(notification->pathStartGate->getId() - notification->pathStartGate->getBaseId());
+            }
+            else if ((this == notification->pathEndGate->getOwnerModule()) && (notification->pathEndGate->getBaseId() == inputGateBaseId)) {
+                rxCutOnTap(notification->pathEndGate->getId() - notification->pathEndGate->getBaseId());
+            }
+            return;
         }
-        return;
+    }
+    else if (signalID == POST_MODEL_CHANGE) {
+        // throw error if new gates have been added
+        if (auto notif = dynamic_cast<cPostGateVectorResizeNotification *>(obj)) {
+            if (strcmp(notif->gateName, "ethg") == 0)
+                throw cRuntimeError("EtherBus does not allow adding/removing links dynamically");
+        }
+
+        if (auto notification = dynamic_cast<cPostPathCreateNotification *>(obj)) {
+            if ((this == notification->pathStartGate->getOwnerModule()) || (this == notification->pathEndGate->getOwnerModule()))
+                checkConnections(false);
+            if (this == notification->pathStartGate->getOwnerModule()) {
+                int tapIdx = notification->pathStartGate->getId() - notification->pathStartGate->getBaseId();
+                copyIncomingsToTap(tapIdx);
+            }
+            return;
+        }
+
+        if (auto cutNotif = dynamic_cast<cPostPathCutNotification *>(obj)) {
+            if ((this == cutNotif->pathStartGate->getOwnerModule()) || (this == cutNotif->pathEndGate->getOwnerModule()))
+                checkConnections(false);
+            return;
+        }
+
+        // note: we are subscribed to the channel object too
+        if (auto parNotif = dynamic_cast<cPostParameterChangeNotification *>(obj)) {
+            cChannel *channel = dynamic_cast<cDatarateChannel *>(parNotif->par->getOwner());
+            if (channel) {
+                cGate *gate = channel->getSourceGate();
+                if (gate->pathContains(this))
+                    checkConnections(false);
+                //TODO: call copyIncomingsToTap(tapIdx) when the channel parameter 'disable' changed from true to false
+            }
+            return;
+        }
     }
 }
 
 void EtherBus::handleMessage(cMessage *msg)
 {
+//    throw cRuntimeError("ETHERBUS not work");
     if (dataratesDiffer)
         checkConnections(true);
 
-    if (!msg->isSelfMessage()) {
-        auto signal = check_and_cast<EthernetSignalBase *>(msg);
+    auto signal = check_and_cast<EthernetSignalBase *>(msg);
+
+    if (!signal->isSelfMessage()) {
         if (signal->getSrcMacFullDuplex() != false)
             throw cRuntimeError("Ethernet misconfiguration: MACs on the Ethernet BUS must be all in half-duplex mode, check it in module '%s'", signal->getSenderModule()->getFullPath().c_str());
 
         // Handle frame sent down from the network entity
-        int tapPoint = msg->getArrivalGate()->getIndex();
-        EV << "Frame " << msg << " arrived on tap " << tapPoint << endl;
-
-        // create upstream and downstream events
-        if (tapPoint > 0) {
-            // start UPSTREAM travel
-            // if goes downstream too, we need to make a copy
-            cMessage *msg2 = (tapPoint < numTaps - 1) ? msg->dup() : msg;
-            msg2->setKind(UPSTREAM);
-            msg2->setContextPointer(&tap[tapPoint - 1]);
-            scheduleAfter(tap[tapPoint].propagationDelay[UPSTREAM], msg2);
+        int tapPoint = signal->getArrivalGate()->getIndex();
+        EV << "Frame " << signal << " arrived on tap " << tapPoint << endl;
+        if (numTaps > 1) {
+            delete tap[tapPoint].incomingSignal;
+            tap[tapPoint].incomingSignal = signal;
+            forwardSignalFrom(tapPoint);
+            if (signal->isReceptionEnd()) {
+                delete tap[tapPoint].incomingSignal;
+                tap[tapPoint].incomingSignal = nullptr;
+            }
         }
-
-        if (tapPoint < numTaps - 1) {
-            // start DOWNSTREAM travel
-            msg->setKind(DOWNSTREAM);
-            msg->setContextPointer(&tap[tapPoint + 1]);
-            scheduleAfter(tap[tapPoint].propagationDelay[DOWNSTREAM], msg);
-        }
-
-        if (numTaps == 1) {
+        else {
             // if there's only one tap, there's nothing to do
-            delete msg;
+            delete signal;
         }
     }
     else {
         // handle upstream and downstream events
-        int direction = msg->getKind();
-        BusTap *thistap = (BusTap *)msg->getContextPointer();
+        int direction = signal->getKind();
+        BusTap *thistap = (BusTap *)signal->getContextPointer();
         int tapPoint = thistap->id;
-        msg->setContextPointer(nullptr);
+        signal->setContextPointer(nullptr);
 
-        EV << "Event " << msg << " on tap " << tapPoint << ", sending out frame\n";
+        EV << "Event " << signal << " on tap " << tapPoint << ", sending out frame\n";
 
         // send out on gate
         bool isLast = (direction == UPSTREAM) ? (tapPoint == 0) : (tapPoint == numTaps - 1);
-        cGate *ogate = gate(outputGateBaseId + tapPoint);
-        if (ogate->isConnected()) {
-            // send out on gate
-            cMessage *msg2 = isLast ? msg : msg->dup();
-
-            if (ogate->getTransmissionChannel()->isBusy()) {
-                delete msg2;    //TODO modify current transmission: set bit error, etc...
-                // stop current transmission
-                //ogate->getTransmissionChannel()->forceTransmissionFinishTime(SIMTIME_ZERO);    //FIXME forceTransmissionFinishTime
-                // send
-                // send(msg2, ogate);
-            }
-            else {
-                send(msg2, ogate);
-            }
+        EthernetSignalBase *signalCopy = isLast ? signal : signal->dup();
+        long origId = signal->getOrigPacketId();
+        if (origId == -1)
+            origId = signal->getId();
+        auto it = thistap->outgoingSignals.find(origId);
+        if (it != thistap->outgoingSignals.end()) {
+            delete it->second;
+            it->second = signalCopy;
         }
         else {
-            // skip gate
-            if (isLast)
-                delete msg;
+            thistap->outgoingSignals.insert(std::pair<long, EthernetSignalBase*>(origId, signalCopy));
+        }
+
+        cGate *ogate = gate(outputGateBaseId + tapPoint);
+        if (ogate->isConnected()) {
+            if (thistap->outgoingOrigId == -1)
+                thistap->outgoingStartTime = simTime();
+            EthernetSignalBase *outSignal = mergeSignals(tapPoint);
+            bool isEnd = outSignal->getRemainingDuration() == SIMTIME_ZERO;
+            // send out on gate
+            if (thistap->outgoingOrigId == -1) {
+                // send a new signal
+                thistap->outgoingOrigId = outSignal->getId();
+                send(outSignal, SendOptions().duration(outSignal->getDuration()), ogate);
+            }
+            else {
+                // update signal
+                send(outSignal, SendOptions().updateTx(thistap->outgoingOrigId, outSignal->getRemainingDuration()).duration(outSignal->getDuration()), ogate);
+            }
+            if (isEnd) {
+                for (auto elem: tap[tapPoint].outgoingSignals)
+                    delete elem.second;
+                tap[tapPoint].outgoingSignals.clear();
+                tap[tapPoint].outgoingOrigId = -1;
+                tap[tapPoint].outgoingStartTime = simTime();
+                tap[tapPoint].outgoingCollision = false;
+                it = thistap->outgoingSignals.end();
+            }
+        }
+        if (it != thistap->outgoingSignals.end() && signalCopy->getRemainingDuration() == SIMTIME_ZERO) {
+            delete it->second;
+            thistap->outgoingSignals.erase(it);
         }
 
         // if not end of the bus, schedule for next tap
@@ -266,10 +306,131 @@ void EtherBus::handleMessage(cMessage *msg)
         else {
             EV << "Scheduling for next tap\n";
             int nextTap = (direction == UPSTREAM) ? (tapPoint - 1) : (tapPoint + 1);
-            msg->setContextPointer(&tap[nextTap]);
-            scheduleAfter(tap[tapPoint].propagationDelay[direction], msg);
+            signal->setContextPointer(&tap[nextTap]);
+            scheduleAfter(tap[tapPoint].propagationDelay[direction], signal);
         }
     }
+}
+
+void EtherBus::forwardSignalFrom(int tapPoint)
+{
+    long origPacketId = tap[tapPoint].incomingSignal->getOrigPacketId();
+    if (origPacketId == -1)
+        origPacketId = tap[tapPoint].incomingSignal->getId();
+    // create upstream and downstream events
+    if (tapPoint > 0) {
+        // start UPSTREAM travel
+        EthernetSignalBase *msg2 = tap[tapPoint].incomingSignal->dup();
+        msg2->setOrigPacketId(origPacketId);
+        msg2->setKind(UPSTREAM);
+        msg2->setContextPointer(&tap[tapPoint - 1]);
+        scheduleAfter(tap[tapPoint].propagationDelay[UPSTREAM], msg2);
+    }
+
+    if (tapPoint < numTaps - 1) {
+        // start DOWNSTREAM travel
+        EthernetSignalBase *msg2 = tap[tapPoint].incomingSignal->dup();
+        msg2->setOrigPacketId(origPacketId);
+        msg2->setKind(DOWNSTREAM);
+        msg2->setContextPointer(&tap[tapPoint + 1]);
+        scheduleAfter(tap[tapPoint].propagationDelay[DOWNSTREAM], msg2);
+    }
+}
+
+EthernetSignalBase *EtherBus::mergeSignals(int tapIdx)
+{
+    simtime_t now = simTime();
+    bool sendSimple = false;
+    if (tap[tapIdx].outgoingSignals.size() == 1 && !tap[tapIdx].outgoingCollision) {
+        EthernetSignalBase *s = tap[tapIdx].outgoingSignals.begin()->second;
+        if (s->getArrivalTime() + s->getRemainingDuration() - s->getDuration() == tap[tapIdx].outgoingStartTime)
+            sendSimple = true;
+    }
+    EthernetSignalBase *signal = nullptr;
+    if (sendSimple) {
+        signal = tap[tapIdx].outgoingSignals.begin()->second->dup();
+        signal->setRemainingDuration(signal->getArrivalTime() + signal->getRemainingDuration() - now);
+    }
+    else {
+        signal = new EthernetSignalBase("collision");
+        tap[tapIdx].outgoingCollision = true;
+        simtime_t startTime = tap[tapIdx].outgoingStartTime;
+        simtime_t endTime;
+        for (auto elem: tap[tapIdx].outgoingSignals) {
+            simtime_t t = elem.second->getArrivalTime() + elem.second->getRemainingDuration();
+            ASSERT(t >= now);
+            if (t > endTime)
+                endTime = t;
+        }
+        signal->setArrivalTime(startTime);
+        signal->setDuration(endTime - startTime);
+        signal->setRemainingDuration(endTime - now);
+        signal->setBitError(true);
+        int64_t newBitLength = (endTime - startTime).dbl() * datarate;
+        signal->setBitLength(newBitLength);
+        signal->setBitrate(datarate);
+    }
+    return signal;
+}
+
+void EtherBus::cutSignalEnd(EthernetSignalBase* signal, simtime_t duration)
+{
+    signal->setRemainingDuration(signal->getArrivalTime() + duration - simTime());
+    signal->setDuration(duration);
+    int64_t newBitLength = duration.dbl() * datarate;
+    if (auto packet = check_and_cast_nullable<Packet*>(signal->decapsulate())) {
+        //TODO: removed length calculation based on the PHY layer (parallel bits, bit order, etc.)
+        if (newBitLength < packet->getBitLength()) {
+            packet->trimFront();
+            packet->setBackOffset(b(newBitLength));
+            packet->trimBack();
+            packet->setBitError(true);
+        }
+        signal->encapsulate(packet);
+    }
+    signal->setBitError(true);
+    signal->setBitLength(newBitLength);
+}
+
+void EtherBus::rxCutOnTap(int inTapIdx)
+{
+    if (tap[inTapIdx].incomingSignal != nullptr) {
+        simtime_t now = simTime();
+        EthernetSignalBase *signal = tap[inTapIdx].incomingSignal;
+        simtime_t duration = now - signal->getArrivalTime();
+        cutSignalEnd(signal, duration);
+        forwardSignalFrom(inTapIdx);
+    }
+}
+
+void EtherBus::cutActiveTxOnTap(int outTapIdx)
+{
+    if (tap[outTapIdx].outgoingSignals.size() == 0) {
+        // no active TX, do nothing
+        ASSERT(tap[outTapIdx].outgoingOrigId == -1);
+        return;
+    }
+
+    simtime_t now = simTime();
+    cGate *ogate = gate(outputGateBaseId + outTapIdx);
+    simtime_t duration = now - tap[outTapIdx].outgoingStartTime;
+    EthernetSignalBase *signal = mergeSignals(outTapIdx);
+    ASSERT(ogate->getTransmissionChannel()->isBusy());
+    cutSignalEnd(signal, duration);
+    send(signal, SendOptions().updateTx(tap[outTapIdx].outgoingOrigId).duration(duration), ogate);
+
+    // transmisssion finished, clear outgoing infos
+    for (auto elem: tap[outTapIdx].outgoingSignals)
+        delete elem.second;
+    tap[outTapIdx].outgoingSignals.clear();
+    tap[outTapIdx].outgoingOrigId = -1;
+    tap[outTapIdx].outgoingStartTime = now;
+    tap[outTapIdx].outgoingCollision = false;
+}
+
+void EtherBus::copyIncomingsToTap(int outTapIdx)
+{
+    throw cRuntimeError("Implementation missing");
 }
 
 void EtherBus::finish()
