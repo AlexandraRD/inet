@@ -51,9 +51,9 @@ network ClientServerWithSM
             parameters:
                 @display("p=100,100;is=s");
         }
-        netAnimTrace: NetAnimTrace {
-            @display("p=100,200;is=s");
-        }
+//        netAnimTrace: NetAnimTrace {
+//            @display("p=100,200;is=s");
+//        }
         scenarioManager: ScenarioManager {
             @display("p=100,300;is=s");
         }

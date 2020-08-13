@@ -1,3 +1,13 @@
+reformat source code
+create release script
+
+Parallel simulation support
+ - compute eariest input/output time for each gate in the network
+   - earliest output time (EOT) per gate starts from the earliest event in the module
+   - earliest input time (EIT) per gate is computed from neighbors' earliest output time per gate + channel delay
+   - refine times by propagating EOT to EIT until there's no change
+   - neighbor partitions' EIT can be easily found
+
 INET 4.3 release TODO items:
 
 1. Clock model
