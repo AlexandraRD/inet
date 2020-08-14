@@ -83,8 +83,12 @@ To preserve causality of events, the partition simulations are not allowed to ad
 
 .. .. note:: Lookahead could be based on other metrics, TODO it can be implemented refer to the manual
 
-The logical processes can send sync messages to each other using either the Message Passing Interface (MPI), or named pipes.
+.. The logical processes can send sync messages to each other using either the Message Passing Interface (MPI), or named pipes.
 MPI needs installation and it needs to be enabled in ``configure.user`` in OMNeT++, but the processes can be run on different computers. Named pipes requires no installation, but processes can only be run on the same machine.
+
+The logical processes can send sync messages to each other using the Message Passing Interface (MPI). MPI needs installation and it needs to be enabled in ``configure.user`` in OMNeT++. The processes can be run on the same computer or on different computers. 
+
+.. note:: An alternative communication method between partitions uses Named pipes. Named pipes requires no installation, but processes can only be run on the same machine, and its performance is worse than MPI's or even the sequential simulation. TODO its there because of historical reasons/for experimental purposes.
 
 .. TODO mpi-t engedelyezni kell a configure-ban
 

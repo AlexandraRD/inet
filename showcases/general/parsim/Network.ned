@@ -32,10 +32,10 @@ module Subnetwork
         inout ethg[];
     submodules:
         configurator: Ipv4NetworkConfigurator {
-            @display("p=300,50;is=s");
+            @display("p=243,38;is=s");
         }
         radioMedium: Ieee80211ScalarRadioMedium {
-            @display("p=300,100;is=s");
+            @display("p=349,38;is=s");
         }
         wiredHost1: StandardHost {
             @display("p=50,150");
@@ -79,10 +79,10 @@ module Subnetwork
 network ParsimNetwork
 {
     parameters:
-        @display("bgb=812,600");
+        @display("bgb=672,427");
     submodules:
         visualizer: <default("")> like IIntegratedVisualizer if typename != "" {
-            @display("p=750,100;is=s");
+            @display("p=633,50;is=s");
         }
         routerA: Router {
             **.networkConfiguratorModule = absPath("^.subnetworkA.configurator");
